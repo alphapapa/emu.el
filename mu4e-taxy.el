@@ -46,12 +46,24 @@
   (taxy-define-key-definer mu4e-taxy-define-key
     mu4e-taxy-keys "mu4e-taxy-key" "FIXME: Docstring."))
 
-(mu4e-taxy-define-key date-format (&key (format "%B (%Y-%m)"))
+(mu4e-taxy-define-key date (&key (format "%F (%A)"))
+  (let ((time (mu4e-message-field item :date)))
+    (format-time-string format time)))
+
+(mu4e-taxy-define-key year (&key (format "%Y"))
+  (let ((time (mu4e-message-field item :date)))
+    (format-time-string format time)))
+
+(mu4e-taxy-define-key month (&key (format "%m (%B %Y)"))
+  (let ((time (mu4e-message-field item :date)))
+    (format-time-string format time)))
+
+(mu4e-taxy-define-key week (&key (format "W%V (%Y)"))
   (let ((time (mu4e-message-field item :date)))
     (format-time-string format time)))
 
 (defvar mu4e-taxy-default-keys
-  '(date-format)
+  '(year month date)
   "Default keys.")
 
 ;;;; Columns
