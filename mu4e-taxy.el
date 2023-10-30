@@ -62,8 +62,39 @@
   (let ((time (mu4e-message-field item :date)))
     (format-time-string format time)))
 
+(mu4e-taxy-define-key list (&key name list)
+  (let ((message-list (mu4e-message-field item :list)))
+    (pcase list
+      ((or `nil (guard (equal message-list list)))
+       (or name message-list)))))
+
+(mu4e-taxy-define-key listp (&key name)
+  (when (mu4e-message-field item :list)
+    (or name "Lists")))
+
+(mu4e-taxy-define-key thread ()
+  (pcase-let* ((meta (mu4e-message-field item :meta))
+               ((map :thread-subject) meta)
+               (subject (mu4e-message-field item :subject)))
+    ;; (if thread-subject
+    ;;     (concat (mu4e~headers-thread-prefix meta) subject)
+    ;;   subject)
+    ;; HACK:
+    (truncate-string-to-width (string-trim-left subject (rx "Re:" (0+ blank))) 80 nil nil t t)))
+
+(mu4e-taxy-define-key subject (subject &key name match-group)
+  (let ((message-subject (mu4e-message-field item :subject)))
+    (when (string-match subject message-subject)
+      (or (when match-group
+            (match-string match-group message-subject))
+          name message-subject))))
+
 (defvar mu4e-taxy-default-keys
-  '(year month date)
+  `(((subject ,(rx (group "bug#" (1+ digit))) :name "Bugs")
+     (subject ,(rx (group "bug#" (1+ digit))) :match-group 1))
+    ((not :name "Non-list" :keys (listp))
+     thread)
+    ((listp :name "Mailing lists") list thread))
   "Default keys.")
 
 ;;;; Columns
@@ -71,24 +102,40 @@
 (eval-and-compile
   (taxy-magit-section-define-column-definer "mu4e-taxy"))
 
-(mu4e-taxy-define-column "From" (:max-width 35 :face mu4e-contact-face)
+(mu4e-taxy-define-column "From" (:max-width 40 :face mu4e-contact-face)
   (cl-labels ((format-contact (contact)
                 (pcase-let* (((map :email :name) contact)
                              (address (format "<%s>" email))
                              (name (when name
                                      (format "%s " name))))
                   (concat name address))))
-    (string-join (mapcar #'format-contact (mu4e-message-field item :from)) ",")))
+    (pcase-let* (((and meta (map :thread-subject)) (mu4e-message-field item :meta))
+                 (prefix (when thread-subject
+                           (concat (mu4e~headers-thread-prefix meta) " "))))
+      (concat prefix
+              (string-join (mapcar #'format-contact (mu4e-message-field item :from)) ",")))))
 
-(mu4e-taxy-define-column "Subject" (:face message-header-subject)
+(mu4e-taxy-define-column "Subject" (:face message-header-subject :max-width 100)
   (mu4e-message-field item :subject))
+
+(mu4e-taxy-define-column "Thread" (:face message-header-subject :max-width 100)
+  (let* ((meta (mu4e-message-field item :meta))
+         (subject (mu4e-message-field item :subject)))
+    (mu4e~headers-thread-prefix meta)
+    (if (plist-get meta :thread-subject)
+        subject "")))
 
 (mu4e-taxy-define-column "Date" (:face org-time-grid)
   (format-time-string "%c" (mu4e-message-field item :date)))
 
+(mu4e-taxy-define-column "List" ()
+  (mu4e-message-field item :list))
+
 (unless mu4e-taxy-columns
   (setq-default mu4e-taxy-columns
                 (get 'mu4e-taxy-columns 'standard-value)))
+
+(setq mu4e-taxy-columns '("Date" "From" "Subject"))
 
 ;;;; Commands
 
@@ -115,7 +162,10 @@
         (erase-buffer)
         (delete-all-overlays)
         (mu4e-taxy-view-mode)
-        (mu4e-taxy--insert-taxy-for (nreverse messages) :query mu4e--search-last-query)
+        (setf messages (nreverse (cl-sort messages #'time-less-p
+                                          :key (lambda (message)
+                                                 (mu4e-message-field message :date)))))
+        (mu4e-taxy--insert-taxy-for messages :query mu4e--search-last-query)
         (pop-to-buffer (current-buffer))))))
 
 ;;;; Mode
@@ -185,7 +235,21 @@ KEYS should be a list of grouping keys, as in
         (setf format-table (car format-cons)
               column-sizes (cdr format-cons)
               header-line-format (taxy-magit-section-format-header
-                                  column-sizes mu4e-taxy-column-formatters))
+                                  column-sizes mu4e-taxy-column-formatters)
+              ;; Sort taxys by the most recent message in each.
+              taxy (thread-last taxy
+                                (taxy-sort-taxys (lambda (a b)
+                                                   (not (time-less-p a b)))
+                                  (lambda (taxy)
+                                    (when (taxy-items taxy)
+                                      (mu4e-message-field (car (seq-sort (lambda (a b)
+                                                                           (not (time-less-p (mu4e-message-field a :date)
+                                                                                             (mu4e-message-field b :date))))
+                                                                         (taxy-items taxy)))
+                                                          :date))))
+                                (taxy-sort-taxys (lambda (a _b)
+                                                   (not (equal a "Mailing lists")))
+                                  #'taxy-name)))
         ;; Before this point, no changes have been made to the buffer's contents.
         (save-excursion
           (taxy-magit-section-insert taxy :items 'first :initial-depth 0))
