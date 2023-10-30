@@ -68,10 +68,6 @@
       ((or `nil (guard (equal message-list list)))
        (or name message-list)))))
 
-(mu4e-taxy-define-key listp (&key name)
-  (when (mu4e-message-field item :list)
-    (or name "Lists")))
-
 (mu4e-taxy-define-key thread ()
   (pcase-let* ((meta (mu4e-message-field item :meta))
                ((map :thread-subject) meta)
@@ -92,9 +88,9 @@
 (defvar mu4e-taxy-default-keys
   `(((subject ,(rx (group "bug#" (1+ digit))) :name "Bugs")
      (subject ,(rx (group "bug#" (1+ digit))) :match-group 1))
-    ((not :name "Non-list" :keys (listp))
+    ((not :name "Non-list" :keys (list))
      thread)
-    ((listp :name "Mailing lists") list thread))
+    ((list :name "Mailing lists") list thread))
   "Default keys.")
 
 ;;;; Columns
@@ -165,8 +161,27 @@
         (setf messages (nreverse (cl-sort messages #'time-less-p
                                           :key (lambda (message)
                                                  (mu4e-message-field message :date)))))
-        (mu4e-taxy--insert-taxy-for messages :query mu4e--search-last-query)
+        (mu4e-taxy--insert-taxy-for messages :query mu4e--search-last-query
+                                    :prefix-item (lambda (message)
+                                                   (mu4e~headers-docid-cookie (mu4e-message-field message :docid)))
+                                    :item-properties (lambda (message)
+                                                       (list 'docid (plist-get message :docid)
+                                                             'msg message)))
         (pop-to-buffer (current-buffer))))))
+
+;;;; Headers commands
+
+;; What a mess, all because mu4e uses `defsubsts' in many places it
+;; shouldn't.
+
+(defmacro mu4e-taxy-defcommand (command)
+  "FIXME: COMMAND."
+  (let ((new-name (intern (concat "mu4e-taxy-" (symbol-name command)))))
+    `(defun ,new-name (&rest args)
+       (interactive)
+       ;; HACK: The hackiest of hacks, but it seems to work...
+       (let ((major-mode 'mu4e-headers-mode))
+         (call-interactively ',command)))))
 
 ;;;; Mode
 
@@ -174,13 +189,18 @@
   :parent magit-section-mode-map
   :doc "Local keymap for `mu4e-taxy-view-mode' buffers."
   "g" #'revert-buffer
-  "s" #'mu4e-search)
+  "s" #'mu4e-search
+  "RET" (mu4e-taxy-defcommand mu4e-headers-view-message)
+  "d" (mu4e-taxy-defcommand mu4e-headers-mark-for-trash)
+  "x" (mu4e-taxy-defcommand mu4e-mark-execute-all))
 
 (define-derived-mode mu4e-taxy-view-mode magit-section-mode
   "mu4e-taxy"
   "FIXME:"
   :group 'mu4e
   :interactive nil
+  ;; HACK:
+  (mu4e--mark-initialize)
   (setq revert-buffer-function #'mu4e-taxy-revert-buffer))
 
 (define-minor-mode mu4e-taxy-mode
@@ -202,12 +222,18 @@ Runs `mu4e-taxy' again with the same query."
   (mu4e-search mu4e--search-last-query))
 
 (cl-defun mu4e-taxy--insert-taxy-for
-    (messages &key (keys mu4e-taxy-default-keys) (query mu4e--search-last-query))
+    (messages &key (keys mu4e-taxy-default-keys) (query mu4e--search-last-query)
+              (prefix-item #'ignore) (item-properties #'ignore))
   "Insert and return a `taxy' for `mu4e-taxy', optionally having ITEMS.
 KEYS should be a list of grouping keys, as in
 `mu4e-taxy-default-keys'."
   (let (format-table column-sizes)
-    (cl-labels ((format-item (item) (gethash item format-table))
+    (cl-labels ((format-item (item)
+                  (let ((string (concat (funcall prefix-item item)
+                                        (gethash item format-table))))
+                    (add-text-properties 0 (length string)
+                                         (funcall item-properties item) string)
+                    string))
                 (make-fn (&rest args)
                   (apply #'make-taxy-magit-section
                          :make #'make-fn
