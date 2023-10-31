@@ -322,6 +322,17 @@
              (otherwise (call-interactively ',command)))))
        (magit-section-forward))))
 
+(defun emu-peek-message ()
+  (interactive)
+  (letrec ((temp-fn
+            (lambda ()
+              (remove-hook 'mu4e-view-rendered-hook temp-fn)
+              (when-let ((buffer (get-buffer "*emu*")))
+                (run-at-time nil nil (lambda ()
+                                       (pop-to-buffer buffer '(display-buffer-reuse-window))))))))
+    (add-hook 'mu4e-view-rendered-hook temp-fn)
+    (call-interactively #'emu-mu4e-headers-view-message)))
+
 (defun emu-message-at-point ()
   (let ((major-mode 'mu4e-headers-mode))
     (mu4e-message-at-point)))
@@ -334,6 +345,7 @@
   "g" #'revert-buffer
   "s" #'mu4e-search
   "RET" (emu-defcommand mu4e-headers-view-message)
+  "SPC" #'emu-peek-message
   "a" (emu-define-mark-command mu4e-headers-mark-for-refile)
   "k" (emu-define-mark-command mu4e-headers-mark-for-trash)
   "f" (emu-define-mark-command mu4e-headers-mark-for-flag)
