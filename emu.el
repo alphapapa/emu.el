@@ -23,10 +23,9 @@
 
 ;;; Commentary:
 
-;; This library implements an alternative UI mu4e based on
-;; `taxy' and `taxy-magit-section'.  To use, activate `emu-mode'
-;; and run an mu4e search; the results will be shown in the
-;; "*emu*" buffer.
+;; This library implements an alternative UI for mu4e based on `taxy'
+;; and `taxy-magit-section'.  To use, activate `emu-mode' and run a
+;; mu4e search; the results will be shown in the "*emu*" buffer.
 
 ;;; Code:
 
@@ -121,9 +120,33 @@
     (when (string-match regexp maildir)
       (or name maildir))))
 
+(emu-define-key num-to/cc> (&key name num)
+  (let ((contacts (append (mu4e-message-field item :to)
+                          (mu4e-message-field item :cc))))
+    (when (> (length contacts) num)
+      (or name num))))
+
+(emu-define-key sent (&key name)
+  (when-let ((address (cl-loop for contact in (mu4e-message-field item :from)
+                               for address = (plist-get contact :email)
+                               when (mu4e-personal-address-p address)
+                               return address)))
+    (or name (concat "Sent from:" address))))
+
 (defvar emu-default-keys
-  `(((maildir :name "Archives" :regexp ,(rx "/Archives/"))
-     thread)
+  `((sent thread)
+    ((maildir :name "Trash" :regexp ,(rx "/Trash"))
+     ((num-to/cc> :name "Group conversations" :num 1)
+      thread)
+     from)
+    ((maildir :name "Archives" :regexp ,(rx "/Archives/"))
+     ((num-to/cc> :name "Group conversations" :num 1)
+      thread)
+     from)
+    ((maildir :name "Inbox" :regexp ,(rx "/Inbox"))
+     ((num-to/cc> :name "Group conversations" :num 1)
+      thread)
+     from)
     ((subject ,(rx (group "bug#" (1+ digit))) :name "Bugs")
      (subject ,(rx (group "bug#" (1+ digit))) :match-group 1))
     ((not :name "Non-list" :keys (list))
@@ -187,17 +210,23 @@
 
 (emu-define-column #("👓" 0 1 (help-echo "Unread")) ()
   (if (member 'unread (mu4e-message-field item :flags))
-      "👓" " "))
+      ;; The emoji's visual width isn't calculated correctly.
+      "U" " "))
 
 (emu-define-column #("📎" 0 1 (help-echo "Attachment")) ()
   (if (member 'attach (mu4e-message-field item :flags))
       "📎" " "))
 
+(emu-define-column #("🗑" 0 1 (help-echo "Trash")) ()
+  (if (member 'trashed (mu4e-message-field item :flags))
+      ;; The emoji's visual width isn't calculated correctly.
+      "T" " "))
+
 (unless emu-columns
   (setq-default emu-columns
                 (get 'emu-columns 'standard-value)))
 
-(setq emu-columns '("📎" "👓" "🚩" "🧍" "Flags" "Date" "From" "Thread" "Maildir"))
+(setq emu-columns '("🗑" "📎" "👓" "🚩" "🧍" "Flags" "Date" "From" "Thread" "Maildir"))
 
 ;;;; Commands
 
@@ -306,9 +335,10 @@
   "s" #'mu4e-search
   "RET" (emu-defcommand mu4e-headers-view-message)
   "a" (emu-define-mark-command mu4e-headers-mark-for-refile)
-  "d" (emu-define-mark-command mu4e-headers-mark-for-trash)
+  "k" (emu-define-mark-command mu4e-headers-mark-for-trash)
   "f" (emu-define-mark-command mu4e-headers-mark-for-flag)
   "F" (emu-define-mark-command mu4e-headers-mark-for-unflag)
+  "m" (emu-define-mark-command mu4e-headers-mark-for-move)
   "r" (emu-define-mark-command mu4e-headers-mark-for-read)
   "R" (emu-define-mark-command mu4e-headers-mark-for-unread)
   "u" (emu-define-mark-command mu4e-headers-mark-for-unmark)
