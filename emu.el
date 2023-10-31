@@ -142,15 +142,18 @@
     (when (> (length contacts) num)
       (or name num))))
 
-(emu-define-key sent (&key name)
+(emu-define-key sent (&key name with-address)
   (when-let ((address (cl-loop for contact in (mu4e-message-field item :from)
                                for address = (plist-get contact :email)
                                when (mu4e-personal-address-p address)
                                return address)))
-    (or name (concat "Sent from:" address))))
+    (or name
+        (when with-address
+          (concat "Sent from: " address))
+        "Sent")))
 
 (defvar emu-default-keys
-  `((sent thread)
+  `((sent (sent :with-address t) thread)
     ((maildir :name "Spam" :regexp ,(rx "/" (or "Junk" "Spam") eos))
      from)
     ((maildir :name "Trash" :regexp ,(rx "/Trash"))
