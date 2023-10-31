@@ -54,8 +54,7 @@
 (defface emu-new '((t (:underline t)))
   "New messages.")
 
-(defface emu-flagged '((t ;; (:inherit font-lock-warning-face)
-                              (:underline t)))
+(defface emu-flagged '((t ()))
   "Flagged messages.")
 
 ;;;; Keys
@@ -117,8 +116,15 @@
             (match-string match-group message-subject))
           name message-subject))))
 
+(emu-define-key maildir (&key name regexp)
+  (let ((maildir (mu4e-message-field item :maildir)))
+    (when (string-match regexp maildir)
+      (or name maildir))))
+
 (defvar emu-default-keys
-  `(((subject ,(rx (group "bug#" (1+ digit))) :name "Bugs")
+  `(((maildir :name "Archives" :regexp ,(rx "/Archives/"))
+     thread)
+    ((subject ,(rx (group "bug#" (1+ digit))) :name "Bugs")
      (subject ,(rx (group "bug#" (1+ digit))) :match-group 1))
     ((not :name "Non-list" :keys (list))
      from thread)
@@ -171,11 +177,27 @@
 (emu-define-column "Flags" (:face font-lock-warning-face)
   (mu4e~headers-flags-str (mu4e-message-field item :flags)))
 
+(emu-define-column #("🚩" 0 1 (help-echo "Flagged")) ()
+  (if (member 'flagged (mu4e-message-field item :flags))
+      "🚩" " "))
+
+(emu-define-column #("🧍" 0 1 (help-echo "Personal")) ()
+  (if (member 'personal (mu4e-message-field item :flags))
+      "🧍" " "))
+
+(emu-define-column #("👓" 0 1 (help-echo "Unread")) ()
+  (if (member 'unread (mu4e-message-field item :flags))
+      "👓" " "))
+
+(emu-define-column #("📎" 0 1 (help-echo "Attachment")) ()
+  (if (member 'attach (mu4e-message-field item :flags))
+      "📎" " "))
+
 (unless emu-columns
   (setq-default emu-columns
                 (get 'emu-columns 'standard-value)))
 
-(setq emu-columns '("Flags" "Date" "From" "Thread" "Maildir"))
+(setq emu-columns '("📎" "👓" "🚩" "🧍" "Flags" "Date" "From" "Thread" "Maildir"))
 
 ;;;; Commands
 
@@ -283,11 +305,12 @@
   "g" #'revert-buffer
   "s" #'mu4e-search
   "RET" (emu-defcommand mu4e-headers-view-message)
-  "!" (emu-define-mark-command mu4e-headers-mark-for-read)
+  "a" (emu-define-mark-command mu4e-headers-mark-for-refile)
   "d" (emu-define-mark-command mu4e-headers-mark-for-trash)
-  "+" (emu-define-mark-command mu4e-headers-mark-for-flag)
-  "-" (emu-define-mark-command mu4e-headers-mark-for-unflag)
-  "r" (emu-define-mark-command mu4e-headers-mark-for-refile)
+  "f" (emu-define-mark-command mu4e-headers-mark-for-flag)
+  "F" (emu-define-mark-command mu4e-headers-mark-for-unflag)
+  "r" (emu-define-mark-command mu4e-headers-mark-for-read)
+  "R" (emu-define-mark-command mu4e-headers-mark-for-unread)
   "u" (emu-define-mark-command mu4e-headers-mark-for-unmark)
   "x" (emu-defcommand mu4e-mark-execute-all))
 
@@ -316,7 +339,13 @@
 (defun emu-revert-buffer (&optional _ignore-auto _noconfirm)
   "Revert `emu-mode' buffer.
 Runs `emu' again with the same query."
-  (emu-mu4e-mark-execute-all)
+  (cl-assert (derived-mode-p 'emu-view-mode))
+  ;; HACK:
+  (cl-letf (((symbol-function 'mu4e--get-current-buffer-type)
+             (lambda (&rest _)
+               'headers)))
+    (unless (zerop (mu4e-mark-marks-num))
+      (emu-mu4e-mark-execute-all)))
   (mu4e-search mu4e--search-last-query))
 
 (cl-defun emu--insert-taxy-for
