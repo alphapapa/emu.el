@@ -40,6 +40,24 @@
 
 (defvar mu4e-taxy-old-headers-append-func nil)
 
+;;;; Faces
+
+(defface mu4e-taxy-contact '((t (:inherit font-lock-variable-name-face)))
+  "Contact names.")
+
+(defface mu4e-taxy-subject '((t (:inherit font-lock-function-name-face)))
+  "Subjects.")
+
+(defface mu4e-taxy-unread '((t (:inherit bold)))
+  "Unread messages.")
+
+(defface mu4e-taxy-new '((t (:underline t)))
+  "New messages.")
+
+(defface mu4e-taxy-flagged '((t ;; (:inherit font-lock-warning-face)
+                              (:underline t)))
+  "Flagged messages.")
+
 ;;;; Keys
 
 (eval-and-compile
@@ -107,12 +125,16 @@
     ((list :name "Mailing lists") list thread))
   "Default keys.")
 
+(defvar mu4e-taxy-mailing-list-keys `(thread))
+
+;; (setq mu4e-taxy-default-keys mu4e-taxy-mailing-list-keys)
+
 ;;;; Columns
 
 (eval-and-compile
   (taxy-magit-section-define-column-definer "mu4e-taxy"))
 
-(mu4e-taxy-define-column "From" (:max-width 40 :face mu4e-contact-face)
+(mu4e-taxy-define-column "From" (:max-width 40 :face mu4e-taxy-contact)
   (cl-labels ((format-contact (contact)
                 (pcase-let* (((map :email :name) contact)
                              (address (format "<%s>" email))
@@ -122,18 +144,20 @@
     (pcase-let* (((and meta (map :thread-subject)) (mu4e-message-field item :meta))
                  (prefix (when thread-subject
                            (concat (mu4e~headers-thread-prefix meta) " "))))
-      (concat prefix
-              (string-join (mapcar #'format-contact (mu4e-message-field item :from)) ",")))))
+      ;; (concat prefix
+      ;;         (string-join (mapcar #'format-contact (mu4e-message-field item :from)) ","))
+      (string-join (mapcar #'format-contact (mu4e-message-field item :from)) ","))))
 
-(mu4e-taxy-define-column "Subject" (:face message-header-subject :max-width 100)
+(mu4e-taxy-define-column "Subject" (:face mu4e-taxy-subject :max-width 100)
   (mu4e-message-field item :subject))
 
-(mu4e-taxy-define-column "Thread" (:face message-header-subject :max-width 100)
+(mu4e-taxy-define-column "Thread" (:face mu4e-taxy-subject :max-width 100)
   (let* ((meta (mu4e-message-field item :meta))
          (subject (mu4e-message-field item :subject)))
-    (mu4e~headers-thread-prefix meta)
     (if (plist-get meta :thread-subject)
-        subject "")))
+        (concat (mu4e~headers-thread-prefix meta)
+                " " subject)
+      subject)))
 
 (mu4e-taxy-define-column "Date" (:face org-time-grid)
   (format-time-string "%c" (mu4e-message-field item :date)))
@@ -141,11 +165,17 @@
 (mu4e-taxy-define-column "List" ()
   (mu4e-message-field item :list))
 
+(mu4e-taxy-define-column "Maildir" ()
+  (mu4e-message-field item :maildir))
+
+(mu4e-taxy-define-column "Flags" (:face font-lock-warning-face)
+  (mu4e~headers-flags-str (mu4e-message-field item :flags)))
+
 (unless mu4e-taxy-columns
   (setq-default mu4e-taxy-columns
                 (get 'mu4e-taxy-columns 'standard-value)))
 
-(setq mu4e-taxy-columns '("Date" "From" "Subject"))
+(setq mu4e-taxy-columns '("Flags" "Date" "From" "Thread" "Maildir"))
 
 ;;;; Commands
 
@@ -175,12 +205,34 @@
         (setf messages (nreverse (cl-sort messages #'time-less-p
                                           :key (lambda (message)
                                                  (mu4e-message-field message :date)))))
-        (mu4e-taxy--insert-taxy-for messages :query mu4e--search-last-query
-                                    :prefix-item (lambda (message)
-                                                   (mu4e~headers-docid-cookie (mu4e-message-field message :docid)))
-                                    :item-properties (lambda (message)
-                                                       (list 'docid (plist-get message :docid)
-                                                             'msg message)))
+        (save-excursion
+          (mu4e-taxy--insert-taxy-for messages :query mu4e--search-last-query
+                                      :prefix-item (lambda (message)
+                                                     (mu4e~headers-docid-cookie (mu4e-message-field message :docid)))
+                                      :item-properties (lambda (message)
+                                                         (list 'docid (plist-get message :docid)
+                                                               'msg message))
+                                      :add-faces (lambda (message)
+                                                   (remq nil
+                                                         (list (when (member 'unread (mu4e-message-field message :flags))
+                                                                 'mu4e-taxy-unread)
+                                                               (when (member 'flagged (mu4e-message-field message :flags))
+                                                                 'mu4e-taxy-flagged)
+                                                               ;; (when (member 'new (mu4e-message-field message :flags))
+                                                               ;;   'mu4e-taxy-new)
+                                                               )))))
+        (when magit-section-visibility-cache
+          (save-excursion
+            ;; Somehow `magit-section-forward' isn't working from the root section.
+            (forward-line 1)
+            (cl-loop with last-section = (magit-current-section)
+                     do (oset (magit-current-section) hidden
+                              (magit-section-cached-visibility (magit-current-section)))
+                     while (progn
+                             (forward-line 1)
+                             (and (magit-current-section)
+                                  (not (eobp))
+                                  (not (equal last-section (magit-current-section))))))))
         (pop-to-buffer (current-buffer))))))
 
 ;;;; Headers commands
@@ -203,6 +255,26 @@
                      (funcall ',new-name)))
              (otherwise (call-interactively ',command))))))))
 
+(defmacro mu4e-taxy-define-mark-command (command)
+  "FIXME: COMMAND."
+  (declare (debug (&define symbolp)))
+  (let ((new-name (intern (concat "mu4e-taxy-" (symbol-name command)))))
+    `(defun ,new-name (&rest args)
+       (interactive)
+       ;; HACK: The hackiest of hacks, but it seems to work...
+       (let ((major-mode 'mu4e-headers-mode))
+         (save-excursion
+           (cl-typecase (oref (magit-current-section) value)
+             (taxy (dolist (child (oref (magit-current-section) children))
+                     (magit-section-goto child)
+                     (funcall ',new-name)))
+             (otherwise (call-interactively ',command)))))
+       (magit-section-forward))))
+
+(defun mu4e-taxy-message-at-point ()
+  (let ((major-mode 'mu4e-headers-mode))
+    (mu4e-message-at-point)))
+
 ;;;; Mode
 
 (defvar-keymap mu4e-taxy-view-mode-map
@@ -211,9 +283,12 @@
   "g" #'revert-buffer
   "s" #'mu4e-search
   "RET" (mu4e-taxy-defcommand mu4e-headers-view-message)
-  "d" (mu4e-taxy-defcommand mu4e-headers-mark-for-trash)
-  "r" (mu4e-taxy-defcommand mu4e-headers-mark-for-refile)
-  "u" (mu4e-taxy-defcommand mu4e-headers-mark-for-unmark)
+  "!" (mu4e-taxy-define-mark-command mu4e-headers-mark-for-read)
+  "d" (mu4e-taxy-define-mark-command mu4e-headers-mark-for-trash)
+  "+" (mu4e-taxy-define-mark-command mu4e-headers-mark-for-flag)
+  "-" (mu4e-taxy-define-mark-command mu4e-headers-mark-for-unflag)
+  "r" (mu4e-taxy-define-mark-command mu4e-headers-mark-for-refile)
+  "u" (mu4e-taxy-define-mark-command mu4e-headers-mark-for-unmark)
   "x" (mu4e-taxy-defcommand mu4e-mark-execute-all))
 
 (define-derived-mode mu4e-taxy-view-mode magit-section-mode
@@ -245,7 +320,7 @@ Runs `mu4e-taxy' again with the same query."
 
 (cl-defun mu4e-taxy--insert-taxy-for
     (messages &key (keys mu4e-taxy-default-keys) (query mu4e--search-last-query)
-              (prefix-item #'ignore) (item-properties #'ignore))
+              (prefix-item #'ignore) (item-properties #'ignore) (add-faces #'ignore))
   "Insert and return a `taxy' for `mu4e-taxy', optionally having ITEMS.
 KEYS should be a list of grouping keys, as in
 `mu4e-taxy-default-keys'."
@@ -255,6 +330,8 @@ KEYS should be a list of grouping keys, as in
                                         (gethash item format-table))))
                     (add-text-properties 0 (length string)
                                          (funcall item-properties item) string)
+                    (dolist (face (funcall add-faces item))
+                      (add-face-text-property 0 (length string) face nil string))
                     string))
                 (make-fn (&rest args)
                   (apply #'make-taxy-magit-section
@@ -299,8 +376,9 @@ KEYS should be a list of grouping keys, as in
                                                    (not (equal a "Mailing lists")))
                                   #'taxy-name)))
         ;; Before this point, no changes have been made to the buffer's contents.
-        (save-excursion
-          (taxy-magit-section-insert taxy :items 'first :initial-depth 0))
+        (let (magit-section-visibility-cache)
+          (save-excursion
+            (taxy-magit-section-insert taxy :items 'first :initial-depth 0)))
         taxy))))
 
 (provide 'mu4e-taxy)
