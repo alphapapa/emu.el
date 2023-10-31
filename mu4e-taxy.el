@@ -62,6 +62,20 @@
   (let ((time (mu4e-message-field item :date)))
     (format-time-string format time)))
 
+(mu4e-taxy-define-key from (&key name from)
+  (cl-labels ((format-contact (contact)
+                (pcase-let* (((map :email :name) contact)
+                             (address (format "<%s>" email))
+                             (name (when name
+                                     (format "%s " name))))
+                  (concat name address))))
+    (let ((message-from (mu4e-message-field item :from)))
+      (pcase from
+        ((or `nil (guard (cl-loop for contact on message-from
+                                  thereis (or (string-match-p from (plist-get contact :email))
+                                              (string-match-p from (plist-get contact :name))))))
+         (or name (string-join (mapcar #'format-contact message-from) ",")))))))
+
 (mu4e-taxy-define-key list (&key name list)
   (let ((message-list (mu4e-message-field item :list)))
     (pcase list
@@ -89,7 +103,7 @@
   `(((subject ,(rx (group "bug#" (1+ digit))) :name "Bugs")
      (subject ,(rx (group "bug#" (1+ digit))) :match-group 1))
     ((not :name "Non-list" :keys (list))
-     thread)
+     from thread)
     ((list :name "Mailing lists") list thread))
   "Default keys.")
 
