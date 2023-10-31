@@ -38,10 +38,7 @@
 (defvar-local emu-visibility-cache nil)
 
 (defvar emu-old-headers-append-func nil)
-
-(defvar emu-new-headers nil
-  "Accumulates headers from a new search.")
-
+(defvar emu-new-headers nil)
 (defvar emu-progress-reporter nil)
 
 ;;;; Faces
@@ -115,12 +112,7 @@
        (or name message-list)))))
 
 (emu-define-key thread ()
-  (pcase-let* ((meta (mu4e-message-field item :meta))
-               ((map :thread-subject) meta)
-               (subject (mu4e-message-field item :subject)))
-    ;; (if thread-subject
-    ;;     (concat (mu4e~headers-thread-prefix meta) subject)
-    ;;   subject)
+  (let ((subject (mu4e-message-field item :subject)))
     ;; HACK:
     (truncate-string-to-width (string-trim-left subject (rx "Re:" (0+ blank))) 80 nil nil t t)))
 
@@ -152,59 +144,60 @@
           (concat "Sent from: " address))
         "Sent")))
 
-(defvar emu-default-keys
-  `((sent (sent :with-address t) thread)
-    ((maildir :name "Spam" :regexp ,(rx "/" (or "Junk" "Spam") eos))
-     from)
-    ((maildir :name "Trash" :regexp ,(rx "/Trash"))
-     ((num-to/cc> :name "Group conversations" :num 1)
-      thread)
-     from)
-    ((maildir :name "Archives" :regexp ,(rx "/Archives/"))
-     ((num-to/cc> :name "Group conversations" :num 1)
-      thread)
-     from)
-    ((maildir :name "Inbox" :regexp ,(rx "/Inbox"))
-     ((num-to/cc> :name "Group conversations" :num 1)
-      thread)
-     ((list :name "Mailing lists")
-      (list :name "GitHub" :regexp "github.com")
-      list thread)
-     from)
-    ((subject ,(rx (group "bug#" (1+ digit))) :name "Bugs")
-     (subject ,(rx (group "bug#" (1+ digit))) :match-group 1))
-    ((not :name "Non-list" :keys (list))
-     from thread)
-    ((list :name "Mailing lists")
-     (list :name "GitHub" :regexp "github.com")
-     list thread))
-  "Default keys.")
+(defvar emu-keychains
+  `( :default ((sent (sent :with-address t) thread)
+               ((maildir :name "Spam" :regexp ,(rx "/" (or "Junk" "Spam") eos))
+                from)
+               ((maildir :name "Trash" :regexp ,(rx "/Trash"))
+                ((num-to/cc> :name "Group conversations" :num 1)
+                 thread)
+                from)
+               ((maildir :name "Archives" :regexp ,(rx "/Archives/"))
+                ((num-to/cc> :name "Group conversations" :num 1)
+                 thread)
+                from)
+               ((maildir :name "Inbox" :regexp ,(rx "/Inbox"))
+                ((num-to/cc> :name "Group conversations" :num 1)
+                 thread)
+                ((list :name "Mailing lists")
+                 (list :name "GitHub" :regexp "github.com")
+                 list thread)
+                from)
+               ((subject ,(rx (group "bug#" (1+ digit))) :name "Bugs")
+                (subject ,(rx (group "bug#" (1+ digit))) :match-group 1))
+               ((not :name "Non-list" :keys (list))
+                from thread)
+               ((list :name "Mailing lists")
+                (list :name "GitHub" :regexp "github.com")
+                list thread))
+     :mailing-list (thread)
+     :spam ((sent thread)
+            ((maildir :name "Trash" :regexp ,(rx "/Trash"))
+             ((num-to/cc> :name "Group conversations" :num 1)
+              thread)
+             from)
+            ((maildir :name "Archives" :regexp ,(rx "/Archives/"))
+             ((num-to/cc> :name "Group conversations" :num 1)
+              thread)
+             from)
+            ((from :title "Domain" :address ,(rx (group "." (1+ (not (any ".")))) eos) :match-group 1))
+            ((maildir :name "Inbox" :regexp ,(rx "/Inbox"))
+             ((num-to/cc> :name "Group conversations" :num 1)
+              thread)
+             from)
+            ((not :name "Non-list" :keys (list))
+             from thread)
+            ((list :name "Mailing lists") list thread))))
 
-(defvar emu-mailing-list-keys `(thread))
+(defvar emu-keychain (map-elt emu-keychains :default))
 
-(defvar emu-spam-keys
-  `((sent thread)
-    ((maildir :name "Trash" :regexp ,(rx "/Trash"))
-     ((num-to/cc> :name "Group conversations" :num 1)
-      thread)
-     from)
-    ((maildir :name "Archives" :regexp ,(rx "/Archives/"))
-     ((num-to/cc> :name "Group conversations" :num 1)
-      thread)
-     from)
-    ((from :title "Domain" :address ,(rx (group "." (1+ (not (any ".")))) eos) :match-group 1))
-    ((maildir :name "Inbox" :regexp ,(rx "/Inbox"))
-     ((num-to/cc> :name "Group conversations" :num 1)
-      thread)
-     from)
-    ((not :name "Non-list" :keys (list))
-     from thread)
-    ((list :name "Mailing lists") list thread))
-  "Keys helpful for collecting and deleting old spam.")
-
-;; (setq emu-default-keys emu-mailing-list-keys)
-
-;; (setq emu-default-keys emu-spam-keys)
+(defun emu-keychain-set (keychain)
+  "Set grouping keychain to KEYCHAIN.
+Interactively, select from one of `emu-keychains'."
+  (interactive
+   (list (map-elt emu-keychains
+                  (intern (completing-read "Set keys: " (map-keys emu-keychains))))))
+  (setf emu-keychain keychain))
 
 ;;;; Columns
 
@@ -218,12 +211,8 @@
                              (name (when name
                                      (format "%s " name))))
                   (concat name address))))
-    (pcase-let* (((and meta (map :thread-subject)) (mu4e-message-field item :meta))
-                 (prefix (when thread-subject
-                           (concat (mu4e~headers-thread-prefix meta) " "))))
-      ;; (concat prefix
-      ;;         (string-join (mapcar #'format-contact (mu4e-message-field item :from)) ","))
-      (string-join (mapcar #'format-contact (mu4e-message-field item :from)) ","))))
+    (pcase-let* ((message-from (mu4e-message-field item :from)))
+      (string-join (mapcar #'format-contact message-from) ","))))
 
 (emu-define-column "Subject" (:face emu-subject :max-width 100)
   (mu4e-message-field item :subject))
@@ -309,7 +298,7 @@
         (with-silent-modifications
           (erase-buffer)
           (delete-all-overlays)
-          (emu-view-mode)
+          (emu-headers-mode)
           (setf messages (nreverse (cl-sort messages #'time-less-p
                                             :key (lambda (message)
                                                    (mu4e-message-field message :date)))))
@@ -352,7 +341,7 @@
   "FIXME: COMMAND."
   (declare (debug (&define symbolp)))
   (let ((new-name (intern (concat "emu-" (symbol-name command)))))
-    `(defun ,new-name (&rest args)
+    `(defun ,new-name (&rest _)
        (interactive)
        ;; HACK: The hackiest of hacks, but it seems to work...
        (let ((major-mode 'mu4e-headers-mode))
@@ -367,7 +356,7 @@
   "FIXME: COMMAND."
   (declare (debug (&define symbolp)))
   (let ((new-name (intern (concat "emu-" (symbol-name command)))))
-    `(defun ,new-name (&rest args)
+    `(defun ,new-name (&rest _)
        (interactive)
        ;; HACK: The hackiest of hacks, but it seems to work...
        (let ((major-mode 'mu4e-headers-mode))
@@ -398,7 +387,7 @@
 
 (defvar-keymap emu-view-mode-map
   :parent magit-section-mode-map
-  :doc "Local keymap for `emu-view-mode' buffers."
+  :doc "Local keymap for `emu-headers-mode' buffers."
   "g" #'revert-buffer
   "s" #'mu4e-search
   "RET" (emu-defcommand mu4e-headers-view-message)
@@ -413,7 +402,7 @@
   "u" (emu-define-mark-command mu4e-headers-mark-for-unmark)
   "x" (emu-defcommand mu4e-mark-execute-all))
 
-(define-derived-mode emu-view-mode magit-section-mode
+(define-derived-mode emu-headers-mode magit-section-mode
   "emu"
   "FIXME:"
   :group 'mu4e
@@ -428,7 +417,7 @@
   :group 'mu4e
   (letrec ((search-fn
             (lambda (&rest _)
-              (setf emu-progress-reporter (make-progress-reporter "Emu searching...")))))
+              (setf emu-progress-reporter (make-progress-reporter "Emu: Searching...")))))
     (if emu-mode
         (progn
           (setf emu-old-headers-append-func mu4e-headers-append-func
@@ -439,14 +428,14 @@
             emu-old-headers-append-func nil)
       (remove-hook 'mu4e-headers-found-hook #'emu--headers-found-hook)
       (remove-hook 'mu4e-search-hook search-fn)))
-  (message "emu-mode %s." (if emu-mode "enabled" "disabled")))
+  (message "Emu: emu-mode %s." (if emu-mode "enabled" "disabled")))
 
 ;;;; Functions
 
 (defun emu-revert-buffer (&optional _ignore-auto _noconfirm)
   "Revert `emu-mode' buffer.
 Runs `emu' again with the same query."
-  (cl-assert (derived-mode-p 'emu-view-mode))
+  (cl-assert (derived-mode-p 'emu-headers-mode))
   ;; HACK:
   (cl-letf (((symbol-function 'mu4e--get-current-buffer-type)
              (lambda (&rest _)
@@ -456,11 +445,15 @@ Runs `emu' again with the same query."
   (mu4e-search mu4e--search-last-query))
 
 (cl-defun emu--insert-taxy-for
-    (messages &key (keys emu-default-keys) (query mu4e--search-last-query)
+    (messages &key (keys emu-keychain) (query mu4e--search-last-query)
               (prefix-item #'ignore) (item-properties #'ignore) (add-faces #'ignore))
-  "Insert and return a `taxy' for `emu', optionally having ITEMS.
-KEYS should be a list of grouping keys, as in
-`emu-default-keys'."
+  "Insert and return a `taxy' for MESSAGES.
+KEYS should be a list of grouping keys, as in `emu-keychain'.
+QUERY should be a query string to show in the first section.
+PREFIX-ITEM, ITEM-PROPERTIES, and ADD-FACES may be functions
+which receive a formatted message string and return a prefix
+string, list of properties, or list of faces, respectively, to be
+added to it."
   (setf emu-progress-reporter (make-progress-reporter "Emu: Sorting messages..." 0 (length messages)))
   (let (format-table column-sizes)
     (cl-labels ((format-item (item)
@@ -487,22 +480,15 @@ KEYS should be a list of grouping keys, as in
              ;; (taxy-magit-section-level-indent 0)
              (taxy (make-fn :name (format "mu4e: %s" query)
                             :take (taxy-make-take-function keys emu-keys)))
-             (_ (cl-loop with target-chunks = 20
-                         with total = (length messages)
-                         with chunk-size = (if (< total target-chunks)
-                                               total
-                                             (/ total target-chunks))
-                         with num-chunks = (/ total chunk-size)
-                         for i from 0 to num-chunks
-                         do (progn
-                              (taxy-fill (cl-subseq messages (* i chunk-size)
-                                                    (min (+ (* i chunk-size) chunk-size) total))
-                                         taxy)
-                              (progress-reporter-update emu-progress-reporter (* i chunk-size)))))
-             (format-cons
-              (taxy-magit-section-format-items
-               emu-columns emu-column-formatters
-               taxy))
+             (_ (cl-loop with chunk-size = 100
+                         with chunks = (seq-partition messages chunk-size)
+                         for i from 0 by chunk-size
+                         for chunk in chunks
+                         do (taxy-fill chunk taxy)
+                         (progress-reporter-update emu-progress-reporter i)))
+             (format-cons (taxy-magit-section-format-items
+                           emu-columns emu-column-formatters
+                           taxy))
              (inhibit-read-only t))
         (setf format-table (car format-cons)
               column-sizes (cdr format-cons)
