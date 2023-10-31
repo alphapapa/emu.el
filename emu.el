@@ -39,6 +39,11 @@
 
 (defvar emu-old-headers-append-func nil)
 
+(defvar emu-new-headers nil
+  "Accumulates headers from a new search.")
+
+(defvar emu-progress-reporter nil)
+
 ;;;; Faces
 
 (defface emu-contact '((t (:inherit font-lock-variable-name-face)))
@@ -78,24 +83,35 @@
   (let ((time (mu4e-message-field item :date)))
     (format-time-string format time)))
 
-(emu-define-key from (&key name from)
+(emu-define-key from (&key title name address match-group)
   (cl-labels ((format-contact (contact)
                 (pcase-let* (((map :email :name) contact)
                              (address (format "<%s>" email))
                              (name (when name
                                      (format "%s " name))))
                   (concat name address))))
-    (let ((message-from (mu4e-message-field item :from)))
-      (pcase from
-        ((or `nil (guard (cl-loop for contact on message-from
-                                  thereis (or (string-match-p from (plist-get contact :email))
-                                              (string-match-p from (plist-get contact :name))))))
-         (or name (string-join (mapcar #'format-contact message-from) ",")))))))
+    (let ((message-from (mu4e-message-field item :from))
+          matched)
+      (if (or name address)
+          (when (cl-loop for contact in message-from
+                         thereis (pcase-let (((map :email (:name contact-name)) contact))
+                                   (or (when email
+                                         (when (string-match address email)
+                                           (if match-group
+                                               (setf matched (match-string match-group email))
+                                             t)))
+                                       (when name
+                                         (when (string-match name contact-name)
+                                           (if match-group
+                                               (setf matched (match-string match-group contact-name))
+                                             t))))))
+            (or matched title (string-join (mapcar #'format-contact message-from) ",")))
+        (string-join (mapcar #'format-contact message-from) ",")))))
 
-(emu-define-key list (&key name list)
+(emu-define-key list (&key name regexp)
   (let ((message-list (mu4e-message-field item :list)))
-    (pcase list
-      ((or `nil (guard (equal message-list list)))
+    (pcase regexp
+      ((or `nil (guard (string-match-p regexp message-list)))
        (or name message-list)))))
 
 (emu-define-key thread ()
@@ -135,6 +151,8 @@
 
 (defvar emu-default-keys
   `((sent thread)
+    ((maildir :name "Spam" :regexp ,(rx "/" (or "Junk" "Spam") eos))
+     from)
     ((maildir :name "Trash" :regexp ,(rx "/Trash"))
      ((num-to/cc> :name "Group conversations" :num 1)
       thread)
@@ -151,12 +169,36 @@
      (subject ,(rx (group "bug#" (1+ digit))) :match-group 1))
     ((not :name "Non-list" :keys (list))
      from thread)
-    ((list :name "Mailing lists") list thread))
+    ((list :name "Mailing lists")
+     (list :name "GitHub" :regexp "github.com")
+     list thread))
   "Default keys.")
 
 (defvar emu-mailing-list-keys `(thread))
 
+(defvar emu-spam-keys
+  `((sent thread)
+    ((maildir :name "Trash" :regexp ,(rx "/Trash"))
+     ((num-to/cc> :name "Group conversations" :num 1)
+      thread)
+     from)
+    ((maildir :name "Archives" :regexp ,(rx "/Archives/"))
+     ((num-to/cc> :name "Group conversations" :num 1)
+      thread)
+     from)
+    ((from :title "Domain" :address ,(rx (group "." (1+ (not (any ".")))) eos) :match-group 1))
+    ((maildir :name "Inbox" :regexp ,(rx "/Inbox"))
+     ((num-to/cc> :name "Group conversations" :num 1)
+      thread)
+     from)
+    ((not :name "Non-list" :keys (list))
+     from thread)
+    ((list :name "Mailing lists") list thread))
+  "Keys helpful for collecting and deleting old spam.")
+
 ;; (setq emu-default-keys emu-mailing-list-keys)
+
+;; (setq emu-default-keys emu-spam-keys)
 
 ;;;; Columns
 
@@ -247,44 +289,53 @@
 
 (cl-defun emu--headers-append-func (messages)
   "FIXME: "
-  (let ((buffer (get-buffer-create "*emu*")))
-    (with-current-buffer buffer
-      (with-silent-modifications
-        (erase-buffer)
-        (delete-all-overlays)
-        (emu-view-mode)
-        (setf messages (nreverse (cl-sort messages #'time-less-p
-                                          :key (lambda (message)
-                                                 (mu4e-message-field message :date)))))
-        (save-excursion
-          (emu--insert-taxy-for messages :query mu4e--search-last-query
-                                      :prefix-item (lambda (message)
-                                                     (mu4e~headers-docid-cookie (mu4e-message-field message :docid)))
-                                      :item-properties (lambda (message)
-                                                         (list 'docid (plist-get message :docid)
-                                                               'msg message))
-                                      :add-faces (lambda (message)
-                                                   (remq nil
-                                                         (list (when (member 'unread (mu4e-message-field message :flags))
-                                                                 'emu-unread)
-                                                               (when (member 'flagged (mu4e-message-field message :flags))
-                                                                 'emu-flagged)
-                                                               ;; (when (member 'new (mu4e-message-field message :flags))
-                                                               ;;   'emu-new)
-                                                               )))))
-        (when magit-section-visibility-cache
+  (cl-callf append emu-new-headers messages)
+  (progress-reporter-update emu-progress-reporter nil (format "%s" (length emu-new-headers))))
+
+(cl-defun emu--headers-found-hook ()
+  "FIXME: "
+  (let ((buffer (get-buffer-create "*emu*"))
+        (messages emu-new-headers))
+    (setf emu-new-headers nil)
+    (when messages
+      ;; HACK: Why would messages be nil?
+      (with-current-buffer buffer
+        (with-silent-modifications
+          (erase-buffer)
+          (delete-all-overlays)
+          (emu-view-mode)
+          (setf messages (nreverse (cl-sort messages #'time-less-p
+                                            :key (lambda (message)
+                                                   (mu4e-message-field message :date)))))
           (save-excursion
-            ;; Somehow `magit-section-forward' isn't working from the root section.
-            (forward-line 1)
-            (cl-loop with last-section = (magit-current-section)
-                     do (oset (magit-current-section) hidden
-                              (magit-section-cached-visibility (magit-current-section)))
-                     while (progn
-                             (forward-line 1)
-                             (and (magit-current-section)
-                                  (not (eobp))
-                                  (not (equal last-section (magit-current-section))))))))
-        (pop-to-buffer (current-buffer))))))
+            (emu--insert-taxy-for messages :query mu4e--search-last-query
+                                  :prefix-item (lambda (message)
+                                                 (mu4e~headers-docid-cookie (mu4e-message-field message :docid)))
+                                  :item-properties (lambda (message)
+                                                     (list 'docid (plist-get message :docid)
+                                                           'msg message))
+                                  :add-faces (lambda (message)
+                                               (remq nil
+                                                     (list (when (member 'unread (mu4e-message-field message :flags))
+                                                             'emu-unread)
+                                                           (when (member 'flagged (mu4e-message-field message :flags))
+                                                             'emu-flagged)
+                                                           ;; (when (member 'new (mu4e-message-field message :flags))
+                                                           ;;   'emu-new)
+                                                           )))))
+          (when magit-section-visibility-cache
+            (save-excursion
+              ;; Somehow `magit-section-forward' isn't working from the root section.
+              (forward-line 1)
+              (cl-loop with last-section = (magit-current-section)
+                       do (oset (magit-current-section) hidden
+                                (magit-section-cached-visibility (magit-current-section)))
+                       while (progn
+                               (forward-line 1)
+                               (and (magit-current-section)
+                                    (not (eobp))
+                                    (not (equal last-section (magit-current-section))))))))
+          (pop-to-buffer (current-buffer) '(display-buffer-same-window)))))))
 
 ;;;; Headers commands
 
@@ -369,11 +420,19 @@
   "FIXME:"
   :global t
   :group 'mu4e
-  (if emu-mode
-      (setf emu-old-headers-append-func mu4e-headers-append-func
-            mu4e-headers-append-func #'emu--headers-append-func)
-    (setf mu4e-headers-append-func emu-old-headers-append-func
-          emu-old-headers-append-func nil))
+  (letrec ((search-fn
+            (lambda (&rest _)
+              (setf emu-progress-reporter (make-progress-reporter "Emu searching...")))))
+    (if emu-mode
+        (progn
+          (setf emu-old-headers-append-func mu4e-headers-append-func
+                mu4e-headers-append-func #'emu--headers-append-func)
+          (add-hook 'mu4e-search-hook search-fn)
+          (add-hook 'mu4e-headers-found-hook #'emu--headers-found-hook))
+      (setf mu4e-headers-append-func emu-old-headers-append-func
+            emu-old-headers-append-func nil)
+      (remove-hook 'mu4e-headers-found-hook #'emu--headers-found-hook)
+      (remove-hook 'mu4e-search-hook search-fn)))
   (message "emu-mode %s." (if emu-mode "enabled" "disabled")))
 
 ;;;; Functions
@@ -396,6 +455,7 @@ Runs `emu' again with the same query."
   "Insert and return a `taxy' for `emu', optionally having ITEMS.
 KEYS should be a list of grouping keys, as in
 `emu-default-keys'."
+  (setf emu-progress-reporter (make-progress-reporter "Emu: Sorting messages..." 0 (length messages)))
   (let (format-table column-sizes)
     (cl-labels ((format-item (item)
                   (let ((string (concat (funcall prefix-item item)
@@ -419,11 +479,20 @@ KEYS should be a list of grouping keys, as in
       (let* ((taxy-magit-section-insert-indent-items nil)
              ;; (taxy-magit-section-item-indent 0)
              ;; (taxy-magit-section-level-indent 0)
-             (taxy
-              (thread-last
-                (make-fn :name (format "mu4e: %s" query)
-                         :take (taxy-make-take-function keys emu-keys))
-                (taxy-fill messages)))
+             (taxy (make-fn :name (format "mu4e: %s" query)
+                            :take (taxy-make-take-function keys emu-keys)))
+             (_ (cl-loop with target-chunks = 20
+                         with total = (length messages)
+                         with chunk-size = (if (< total target-chunks)
+                                               total
+                                             (/ total target-chunks))
+                         with num-chunks = (/ total chunk-size)
+                         for i from 0 to num-chunks
+                         do (progn
+                              (taxy-fill (cl-subseq messages (* i chunk-size)
+                                                    (min (+ (* i chunk-size) chunk-size) total))
+                                         taxy)
+                              (progress-reporter-update emu-progress-reporter (* i chunk-size)))))
              (format-cons
               (taxy-magit-section-format-items
                emu-columns emu-column-formatters
@@ -448,9 +517,11 @@ KEYS should be a list of grouping keys, as in
                                                    (not (equal a "Mailing lists")))
                                   #'taxy-name)))
         ;; Before this point, no changes have been made to the buffer's contents.
+        (setf emu-progress-reporter (make-progress-reporter "Emu: Inserting messages..."))
         (let (magit-section-visibility-cache)
           (save-excursion
             (taxy-magit-section-insert taxy :items 'first :initial-depth 0)))
+        (progress-reporter-done emu-progress-reporter)
         taxy))))
 
 (provide 'emu)
