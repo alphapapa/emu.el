@@ -109,7 +109,7 @@
         (string-join (mapcar #'format-contact message-from) ",")))))
 
 (emu-define-key list (&key name regexp)
-  (let ((message-list (mu4e-message-field item :list)))
+  (when-let ((message-list (mu4e-message-field item :list)))
     (pcase regexp
       ((or `nil (guard (string-match-p regexp message-list)))
        (or name message-list)))))
@@ -164,6 +164,9 @@
     ((maildir :name "Inbox" :regexp ,(rx "/Inbox"))
      ((num-to/cc> :name "Group conversations" :num 1)
       thread)
+     ((list :name "Mailing lists")
+      (list :name "GitHub" :regexp "github.com")
+      list thread)
      from)
     ((subject ,(rx (group "bug#" (1+ digit))) :name "Bugs")
      (subject ,(rx (group "bug#" (1+ digit))) :match-group 1))
