@@ -212,6 +212,8 @@
   "s" #'mu4e-search
   "RET" (mu4e-taxy-defcommand mu4e-headers-view-message)
   "d" (mu4e-taxy-defcommand mu4e-headers-mark-for-trash)
+  "r" (mu4e-taxy-defcommand mu4e-headers-mark-for-refile)
+  "u" (mu4e-taxy-defcommand mu4e-headers-mark-for-unmark)
   "x" (mu4e-taxy-defcommand mu4e-mark-execute-all))
 
 (define-derived-mode mu4e-taxy-view-mode magit-section-mode
