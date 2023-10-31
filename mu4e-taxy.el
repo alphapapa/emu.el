@@ -190,12 +190,18 @@
 
 (defmacro mu4e-taxy-defcommand (command)
   "FIXME: COMMAND."
+  (declare (debug (&define symbolp)))
   (let ((new-name (intern (concat "mu4e-taxy-" (symbol-name command)))))
     `(defun ,new-name (&rest args)
        (interactive)
        ;; HACK: The hackiest of hacks, but it seems to work...
        (let ((major-mode 'mu4e-headers-mode))
-         (call-interactively ',command)))))
+         (save-excursion
+           (cl-typecase (oref (magit-current-section) value)
+             (taxy (dolist (child (oref (magit-current-section) children))
+                     (magit-section-goto child)
+                     (funcall ',new-name)))
+             (otherwise (call-interactively ',command))))))))
 
 ;;;; Mode
 
