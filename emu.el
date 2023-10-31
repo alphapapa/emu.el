@@ -1,10 +1,10 @@
-;;; mu4e-taxy.el --- Grouped headers view for mu4e   -*- lexical-binding: t; -*-
+;;; emu.el --- Alternative UI for for mu4e   -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2023  Adam Porter
 
 ;; Author: Adam Porter <adam@alphapapa.net>
 ;; Keywords: comm
-;; URL: https://github.com/alphapapa/mu4e-taxy.el
+;; URL: https://github.com/alphapapa/emu.el
 ;; Package-Requires: ((taxy-magit-section "0.12.1"))
 ;; Version: 0.1-pre
 
@@ -23,10 +23,10 @@
 
 ;;; Commentary:
 
-;; This library implements a grouped message list for mu4e based on
-;; `taxy' and `taxy-magit-section'.  To use, activate `mu4e-taxy-mode'
+;; This library implements an alternative UI mu4e based on
+;; `taxy' and `taxy-magit-section'.  To use, activate `emu-mode'
 ;; and run an mu4e search; the results will be shown in the
-;; "*mu4e-taxy*" buffer.
+;; "*emu*" buffer.
 
 ;;; Code:
 
@@ -36,51 +36,51 @@
 
 ;;;; Variables
 
-(defvar-local mu4e-taxy-visibility-cache nil)
+(defvar-local emu-visibility-cache nil)
 
-(defvar mu4e-taxy-old-headers-append-func nil)
+(defvar emu-old-headers-append-func nil)
 
 ;;;; Faces
 
-(defface mu4e-taxy-contact '((t (:inherit font-lock-variable-name-face)))
+(defface emu-contact '((t (:inherit font-lock-variable-name-face)))
   "Contact names.")
 
-(defface mu4e-taxy-subject '((t (:inherit font-lock-function-name-face)))
+(defface emu-subject '((t (:inherit font-lock-function-name-face)))
   "Subjects.")
 
-(defface mu4e-taxy-unread '((t (:inherit bold)))
+(defface emu-unread '((t (:inherit bold)))
   "Unread messages.")
 
-(defface mu4e-taxy-new '((t (:underline t)))
+(defface emu-new '((t (:underline t)))
   "New messages.")
 
-(defface mu4e-taxy-flagged '((t ;; (:inherit font-lock-warning-face)
+(defface emu-flagged '((t ;; (:inherit font-lock-warning-face)
                               (:underline t)))
   "Flagged messages.")
 
 ;;;; Keys
 
 (eval-and-compile
-  (taxy-define-key-definer mu4e-taxy-define-key
-    mu4e-taxy-keys "mu4e-taxy-key" "FIXME: Docstring."))
+  (taxy-define-key-definer emu-define-key
+    emu-keys "emu-key" "FIXME: Docstring."))
 
-(mu4e-taxy-define-key date (&key (format "%F (%A)"))
+(emu-define-key date (&key (format "%F (%A)"))
   (let ((time (mu4e-message-field item :date)))
     (format-time-string format time)))
 
-(mu4e-taxy-define-key year (&key (format "%Y"))
+(emu-define-key year (&key (format "%Y"))
   (let ((time (mu4e-message-field item :date)))
     (format-time-string format time)))
 
-(mu4e-taxy-define-key month (&key (format "%m (%B %Y)"))
+(emu-define-key month (&key (format "%m (%B %Y)"))
   (let ((time (mu4e-message-field item :date)))
     (format-time-string format time)))
 
-(mu4e-taxy-define-key week (&key (format "W%V (%Y)"))
+(emu-define-key week (&key (format "W%V (%Y)"))
   (let ((time (mu4e-message-field item :date)))
     (format-time-string format time)))
 
-(mu4e-taxy-define-key from (&key name from)
+(emu-define-key from (&key name from)
   (cl-labels ((format-contact (contact)
                 (pcase-let* (((map :email :name) contact)
                              (address (format "<%s>" email))
@@ -94,13 +94,13 @@
                                               (string-match-p from (plist-get contact :name))))))
          (or name (string-join (mapcar #'format-contact message-from) ",")))))))
 
-(mu4e-taxy-define-key list (&key name list)
+(emu-define-key list (&key name list)
   (let ((message-list (mu4e-message-field item :list)))
     (pcase list
       ((or `nil (guard (equal message-list list)))
        (or name message-list)))))
 
-(mu4e-taxy-define-key thread ()
+(emu-define-key thread ()
   (pcase-let* ((meta (mu4e-message-field item :meta))
                ((map :thread-subject) meta)
                (subject (mu4e-message-field item :subject)))
@@ -110,14 +110,14 @@
     ;; HACK:
     (truncate-string-to-width (string-trim-left subject (rx "Re:" (0+ blank))) 80 nil nil t t)))
 
-(mu4e-taxy-define-key subject (subject &key name match-group)
+(emu-define-key subject (subject &key name match-group)
   (let ((message-subject (mu4e-message-field item :subject)))
     (when (string-match subject message-subject)
       (or (when match-group
             (match-string match-group message-subject))
           name message-subject))))
 
-(defvar mu4e-taxy-default-keys
+(defvar emu-default-keys
   `(((subject ,(rx (group "bug#" (1+ digit))) :name "Bugs")
      (subject ,(rx (group "bug#" (1+ digit))) :match-group 1))
     ((not :name "Non-list" :keys (list))
@@ -125,16 +125,16 @@
     ((list :name "Mailing lists") list thread))
   "Default keys.")
 
-(defvar mu4e-taxy-mailing-list-keys `(thread))
+(defvar emu-mailing-list-keys `(thread))
 
-;; (setq mu4e-taxy-default-keys mu4e-taxy-mailing-list-keys)
+;; (setq emu-default-keys emu-mailing-list-keys)
 
 ;;;; Columns
 
 (eval-and-compile
-  (taxy-magit-section-define-column-definer "mu4e-taxy"))
+  (taxy-magit-section-define-column-definer "emu"))
 
-(mu4e-taxy-define-column "From" (:max-width 40 :face mu4e-taxy-contact)
+(emu-define-column "From" (:max-width 40 :face emu-contact)
   (cl-labels ((format-contact (contact)
                 (pcase-let* (((map :email :name) contact)
                              (address (format "<%s>" email))
@@ -148,10 +148,10 @@
       ;;         (string-join (mapcar #'format-contact (mu4e-message-field item :from)) ","))
       (string-join (mapcar #'format-contact (mu4e-message-field item :from)) ","))))
 
-(mu4e-taxy-define-column "Subject" (:face mu4e-taxy-subject :max-width 100)
+(emu-define-column "Subject" (:face emu-subject :max-width 100)
   (mu4e-message-field item :subject))
 
-(mu4e-taxy-define-column "Thread" (:face mu4e-taxy-subject :max-width 100)
+(emu-define-column "Thread" (:face emu-subject :max-width 100)
   (let* ((meta (mu4e-message-field item :meta))
          (subject (mu4e-message-field item :subject)))
     (if (plist-get meta :thread-subject)
@@ -159,30 +159,30 @@
                 " " subject)
       subject)))
 
-(mu4e-taxy-define-column "Date" (:face org-time-grid)
+(emu-define-column "Date" (:face org-time-grid)
   (format-time-string "%c" (mu4e-message-field item :date)))
 
-(mu4e-taxy-define-column "List" ()
+(emu-define-column "List" ()
   (mu4e-message-field item :list))
 
-(mu4e-taxy-define-column "Maildir" ()
+(emu-define-column "Maildir" ()
   (mu4e-message-field item :maildir))
 
-(mu4e-taxy-define-column "Flags" (:face font-lock-warning-face)
+(emu-define-column "Flags" (:face font-lock-warning-face)
   (mu4e~headers-flags-str (mu4e-message-field item :flags)))
 
-(unless mu4e-taxy-columns
-  (setq-default mu4e-taxy-columns
-                (get 'mu4e-taxy-columns 'standard-value)))
+(unless emu-columns
+  (setq-default emu-columns
+                (get 'emu-columns 'standard-value)))
 
-(setq mu4e-taxy-columns '("Flags" "Date" "From" "Thread" "Maildir"))
+(setq emu-columns '("Flags" "Date" "From" "Thread" "Maildir"))
 
 ;;;; Commands
 
-;; (cl-defun mu4e-taxy (query)
+;; (cl-defun emu (query)
 ;;   "FIXME: "
 ;;   (interactive (list mu4e--search-last-query))
-;;   (let* ((mu4e-headers-append-func #'mu4e-taxy--headers-append-func)
+;;   (let* ((mu4e-headers-append-func #'emu--headers-append-func)
 ;;          (rewritten-expr (funcall mu4e-query-rewrite-function query))
 ;;          (maxnum (unless mu4e-search-full mu4e-search-results-limit)))
 ;;     (mu4e--server-find
@@ -194,19 +194,19 @@
 ;;      mu4e-search-skip-duplicates
 ;;      mu4e-search-include-related)))
 
-(cl-defun mu4e-taxy--headers-append-func (messages)
+(cl-defun emu--headers-append-func (messages)
   "FIXME: "
-  (let ((buffer (get-buffer-create "*mu4e-taxy*")))
+  (let ((buffer (get-buffer-create "*emu*")))
     (with-current-buffer buffer
       (with-silent-modifications
         (erase-buffer)
         (delete-all-overlays)
-        (mu4e-taxy-view-mode)
+        (emu-view-mode)
         (setf messages (nreverse (cl-sort messages #'time-less-p
                                           :key (lambda (message)
                                                  (mu4e-message-field message :date)))))
         (save-excursion
-          (mu4e-taxy--insert-taxy-for messages :query mu4e--search-last-query
+          (emu--insert-taxy-for messages :query mu4e--search-last-query
                                       :prefix-item (lambda (message)
                                                      (mu4e~headers-docid-cookie (mu4e-message-field message :docid)))
                                       :item-properties (lambda (message)
@@ -215,11 +215,11 @@
                                       :add-faces (lambda (message)
                                                    (remq nil
                                                          (list (when (member 'unread (mu4e-message-field message :flags))
-                                                                 'mu4e-taxy-unread)
+                                                                 'emu-unread)
                                                                (when (member 'flagged (mu4e-message-field message :flags))
-                                                                 'mu4e-taxy-flagged)
+                                                                 'emu-flagged)
                                                                ;; (when (member 'new (mu4e-message-field message :flags))
-                                                               ;;   'mu4e-taxy-new)
+                                                               ;;   'emu-new)
                                                                )))))
         (when magit-section-visibility-cache
           (save-excursion
@@ -240,10 +240,10 @@
 ;; What a mess, all because mu4e uses `defsubsts' in many places it
 ;; shouldn't.
 
-(defmacro mu4e-taxy-defcommand (command)
+(defmacro emu-defcommand (command)
   "FIXME: COMMAND."
   (declare (debug (&define symbolp)))
-  (let ((new-name (intern (concat "mu4e-taxy-" (symbol-name command)))))
+  (let ((new-name (intern (concat "emu-" (symbol-name command)))))
     `(defun ,new-name (&rest args)
        (interactive)
        ;; HACK: The hackiest of hacks, but it seems to work...
@@ -255,10 +255,10 @@
                      (funcall ',new-name)))
              (otherwise (call-interactively ',command))))))))
 
-(defmacro mu4e-taxy-define-mark-command (command)
+(defmacro emu-define-mark-command (command)
   "FIXME: COMMAND."
   (declare (debug (&define symbolp)))
-  (let ((new-name (intern (concat "mu4e-taxy-" (symbol-name command)))))
+  (let ((new-name (intern (concat "emu-" (symbol-name command)))))
     `(defun ,new-name (&rest args)
        (interactive)
        ;; HACK: The hackiest of hacks, but it seems to work...
@@ -271,59 +271,60 @@
              (otherwise (call-interactively ',command)))))
        (magit-section-forward))))
 
-(defun mu4e-taxy-message-at-point ()
+(defun emu-message-at-point ()
   (let ((major-mode 'mu4e-headers-mode))
     (mu4e-message-at-point)))
 
 ;;;; Mode
 
-(defvar-keymap mu4e-taxy-view-mode-map
+(defvar-keymap emu-view-mode-map
   :parent magit-section-mode-map
-  :doc "Local keymap for `mu4e-taxy-view-mode' buffers."
+  :doc "Local keymap for `emu-view-mode' buffers."
   "g" #'revert-buffer
   "s" #'mu4e-search
-  "RET" (mu4e-taxy-defcommand mu4e-headers-view-message)
-  "!" (mu4e-taxy-define-mark-command mu4e-headers-mark-for-read)
-  "d" (mu4e-taxy-define-mark-command mu4e-headers-mark-for-trash)
-  "+" (mu4e-taxy-define-mark-command mu4e-headers-mark-for-flag)
-  "-" (mu4e-taxy-define-mark-command mu4e-headers-mark-for-unflag)
-  "r" (mu4e-taxy-define-mark-command mu4e-headers-mark-for-refile)
-  "u" (mu4e-taxy-define-mark-command mu4e-headers-mark-for-unmark)
-  "x" (mu4e-taxy-defcommand mu4e-mark-execute-all))
+  "RET" (emu-defcommand mu4e-headers-view-message)
+  "!" (emu-define-mark-command mu4e-headers-mark-for-read)
+  "d" (emu-define-mark-command mu4e-headers-mark-for-trash)
+  "+" (emu-define-mark-command mu4e-headers-mark-for-flag)
+  "-" (emu-define-mark-command mu4e-headers-mark-for-unflag)
+  "r" (emu-define-mark-command mu4e-headers-mark-for-refile)
+  "u" (emu-define-mark-command mu4e-headers-mark-for-unmark)
+  "x" (emu-defcommand mu4e-mark-execute-all))
 
-(define-derived-mode mu4e-taxy-view-mode magit-section-mode
-  "mu4e-taxy"
+(define-derived-mode emu-view-mode magit-section-mode
+  "emu"
   "FIXME:"
   :group 'mu4e
   :interactive nil
   ;; HACK:
   (mu4e--mark-initialize)
-  (setq revert-buffer-function #'mu4e-taxy-revert-buffer))
+  (setq revert-buffer-function #'emu-revert-buffer))
 
-(define-minor-mode mu4e-taxy-mode
+(define-minor-mode emu-mode
   "FIXME:"
   :global t
   :group 'mu4e
-  (if mu4e-taxy-mode
-      (setf mu4e-taxy-old-headers-append-func mu4e-headers-append-func
-            mu4e-headers-append-func #'mu4e-taxy--headers-append-func)
-    (setf mu4e-headers-append-func mu4e-taxy-old-headers-append-func
-          mu4e-taxy-old-headers-append-func nil))
-  (message "mu4e-taxy-mode %s." (if mu4e-taxy-mode "enabled" "disabled")))
+  (if emu-mode
+      (setf emu-old-headers-append-func mu4e-headers-append-func
+            mu4e-headers-append-func #'emu--headers-append-func)
+    (setf mu4e-headers-append-func emu-old-headers-append-func
+          emu-old-headers-append-func nil))
+  (message "emu-mode %s." (if emu-mode "enabled" "disabled")))
 
 ;;;; Functions
 
-(defun mu4e-taxy-revert-buffer (&optional _ignore-auto _noconfirm)
-  "Revert `mu4e-taxy-mode' buffer.
-Runs `mu4e-taxy' again with the same query."
+(defun emu-revert-buffer (&optional _ignore-auto _noconfirm)
+  "Revert `emu-mode' buffer.
+Runs `emu' again with the same query."
+  (emu-mu4e-mark-execute-all)
   (mu4e-search mu4e--search-last-query))
 
-(cl-defun mu4e-taxy--insert-taxy-for
-    (messages &key (keys mu4e-taxy-default-keys) (query mu4e--search-last-query)
+(cl-defun emu--insert-taxy-for
+    (messages &key (keys emu-default-keys) (query mu4e--search-last-query)
               (prefix-item #'ignore) (item-properties #'ignore) (add-faces #'ignore))
-  "Insert and return a `taxy' for `mu4e-taxy', optionally having ITEMS.
+  "Insert and return a `taxy' for `emu', optionally having ITEMS.
 KEYS should be a list of grouping keys, as in
-`mu4e-taxy-default-keys'."
+`emu-default-keys'."
   (let (format-table column-sizes)
     (cl-labels ((format-item (item)
                   (let ((string (concat (funcall prefix-item item)
@@ -350,17 +351,17 @@ KEYS should be a list of grouping keys, as in
              (taxy
               (thread-last
                 (make-fn :name (format "mu4e: %s" query)
-                         :take (taxy-make-take-function keys mu4e-taxy-keys))
+                         :take (taxy-make-take-function keys emu-keys))
                 (taxy-fill messages)))
              (format-cons
               (taxy-magit-section-format-items
-               mu4e-taxy-columns mu4e-taxy-column-formatters
+               emu-columns emu-column-formatters
                taxy))
              (inhibit-read-only t))
         (setf format-table (car format-cons)
               column-sizes (cdr format-cons)
               header-line-format (taxy-magit-section-format-header
-                                  column-sizes mu4e-taxy-column-formatters)
+                                  column-sizes emu-column-formatters)
               ;; Sort taxys by the most recent message in each.
               taxy (thread-last taxy
                                 (taxy-sort-taxys (lambda (a b)
@@ -381,5 +382,5 @@ KEYS should be a list of grouping keys, as in
             (taxy-magit-section-insert taxy :items 'first :initial-depth 0)))
         taxy))))
 
-(provide 'mu4e-taxy)
-;;; mu4e-taxy.el ends here
+(provide 'emu)
+;;; emu.el ends here
