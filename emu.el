@@ -388,7 +388,7 @@ Interactively, select from one of `emu-keychains'."
 
 ;;;; Mode
 
-(defvar-keymap emu-view-mode-map
+(defvar-keymap emu-headers-mode-map
   :parent magit-section-mode-map
   :doc "Local keymap for `emu-headers-mode' buffers."
   "g" #'revert-buffer
@@ -412,7 +412,7 @@ Interactively, select from one of `emu-keychains'."
   :interactive nil
   ;; HACK:
   (mu4e--mark-initialize)
-  (setq revert-buffer-function #'emu-revert-buffer))
+  (setq-local revert-buffer-function #'emu-revert-buffer))
 
 (define-minor-mode emu-mode
   "FIXME:"
