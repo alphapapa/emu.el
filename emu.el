@@ -35,6 +35,14 @@
 
 ;;;; Variables
 
+(defvar-local emu-marks (make-hash-table :test #'equal)
+  "Records message marks in a headers buffer.")
+(defvar-local emu-overlays (make-hash-table :test #'equal)
+  "Records message overlays in a headers buffer.")
+(defvar-local emu-format-message nil
+  "Function used to format a message for display in the headers buffer.
+Set at runtime when `taxy-magit-section' inserts the
+`magit-section' when displaying headers.")
 (defvar-local emu-visibility-cache nil)
 
 (defvar emu-old-headers-append-func nil)
@@ -386,6 +394,34 @@ Interactively, select from one of `emu-keychains'."
   (let ((major-mode 'mu4e-headers-mode))
     (mu4e-message-at-point)))
 
+;;;;; New headers commands
+
+(cl-defun emu-mark (mark message &key removep)
+  "Apply MARK to MESSAGE.
+If REMOVEP, remove MARK from MESSAGE."
+  (interactive (list (emu-read-mark) (emu-message-at-point)
+                     :removep current-prefix-arg))
+  (if removep
+      (cl-callf2 remove mark (map-elt emu-marks message))
+    (cl-pushnew mark (map-elt emu-marks message)))
+  (pcase (map-elt emu-marks message)
+    (`nil (when-let ((ov (gethash message emu-overlays)))
+            (delete-overlay ov)
+            (setf (gethash message emu-overlays) nil)))
+    (marks (let* ((formatted-marks (format "%S" marks))
+                  (ov (or (gethash message emu-overlays)
+                          (setf (gethash message emu-overlays)
+                                (make-overlay (pos-bol) (1+ (pos-bol)))))))
+             (setf (overlay-end ov) (+ (pos-bol) (length formatted-marks)))
+             (overlay-put ov 'display formatted-marks)))))
+
+(cl-defun emu-read-mark (&key (prompt "Mark as: "))
+  "Return a mark read with completion.
+PROMPT is passed to `completing-read', which see."
+  (let* ((marks '(unread))
+         (selected (completing-read prompt marks nil t)))
+    (intern selected)))
+
 ;;;; Mode
 
 (defvar-keymap emu-headers-mode-map
@@ -410,8 +446,7 @@ Interactively, select from one of `emu-keychains'."
   "FIXME:"
   :group 'mu4e
   :interactive nil
-  ;; HACK:
-  (mu4e--mark-initialize)
+  (clrhash emu-marks)
   (setq-local revert-buffer-function #'emu-revert-buffer))
 
 (define-minor-mode emu-mode
@@ -434,6 +469,16 @@ Interactively, select from one of `emu-keychains'."
   (message "Emu: emu-mode %s." (if emu-mode "enabled" "disabled")))
 
 ;;;; Functions
+
+;; NOTE: This requires refactoring in taxy-magit-section.
+;; (defun emu-invalidate ()
+;;   "Invalidate message at point.
+;; Update its representation in section at point."
+;;   (unless (plist-get (oref (magit-current-section) value) :docid)
+;;     (user-error "No message at point"))
+;;   (setf (buffer-substring (oref (magit-current-section) start)
+;;                           (oref (magit-current-section) end))
+;;         (funcall emu-format-message (oref (magit-current-section) value))))
 
 (defun emu-revert-buffer (&optional _ignore-auto _noconfirm)
   "Revert `emu-mode' buffer.
@@ -511,9 +556,10 @@ added to it."
                                         (mu4e-message-field newest-message :date)))))
                                 (taxy-sort-taxys (lambda (a _b)
                                                    (not (equal a "Mailing lists")))
-                                  #'taxy-name)))
+                                  #'taxy-name))
+              emu-progress-reporter (make-progress-reporter "Emu: Inserting messages...")
+              emu-format-message #'format-item)
         ;; Before this point, no changes have been made to the buffer's contents.
-        (setf emu-progress-reporter (make-progress-reporter "Emu: Inserting messages..."))
         (let (magit-section-visibility-cache)
           (save-excursion
             (taxy-magit-section-insert taxy :items 'first :initial-depth 0)))
