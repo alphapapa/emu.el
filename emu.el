@@ -64,6 +64,10 @@
   (taxy-define-key-definer emu-define-key
     emu-keys "emu-key" "FIXME: Docstring."))
 
+(emu-define-key unread ()
+  (when (memq 'unread (mu4e-message-field item :flags))
+    "Unread"))
+
 (emu-define-key date (&key (format "%F (%A)"))
   (let ((time (mu4e-message-field item :date)))
     (format-time-string format time)))
@@ -146,6 +150,7 @@
 
 (defvar emu-keychains
   `( :default ((sent (sent :with-address t) thread)
+               (not :name "Read" :keys (unread))
                ((maildir :name "Spam" :regexp ,(rx "/" (or "Junk" "Spam") eos))
                 from)
                ((maildir :name "Trash" :regexp ,(rx "/Trash" eos))
