@@ -417,7 +417,8 @@ Interactively, select from one of `emu-keychains'."
   :interactive nil
   ;; HACK:
   (mu4e--mark-initialize)
-  (setq-local revert-buffer-function #'emu-revert-buffer))
+  (setq-local bookmark-make-record-function #'emu--bookmark-make-record
+              revert-buffer-function #'emu-revert-buffer))
 
 (define-minor-mode emu-mode
   "FIXME:"
@@ -524,6 +525,24 @@ added to it."
             (taxy-magit-section-insert taxy :items 'first :initial-depth 0)))
         (progress-reporter-done emu-progress-reporter)
         taxy))))
+
+;;;;; Bookmark support
+
+(defun emu--bookmark-make-record ()
+  "Return bookmark record for current Emu buffer."
+  (cl-assert mu4e--search-last-query)
+  `(,(format "Emu: %s" mu4e--search-last-query)
+    (handler . ,#'emu--bookmark-handler)
+    (query . ,mu4e--search-last-query)))
+
+;;;###autoload
+(defun emu--bookmark-handler (record)
+  "Handle Emu bookmark RECORD."
+  (let ((query (bookmark-prop-get record 'query)))
+    (cl-assert query)
+    (unless emu-mode
+      (emu-mode))
+    (mu4e-search query)))
 
 (provide 'emu)
 ;;; emu.el ends here
