@@ -64,6 +64,14 @@
   (taxy-define-key-definer emu-define-key
     emu-keys "emu-key" "FIXME: Docstring."))
 
+(defmacro emu-with-order (&rest body)
+  `(let ((value ,(macroexp-progn body)))
+     (if order
+         (propertize value :emu-order order)
+       value)))
+
+;; TODO: Add :order argument to rest of these keys.
+
 (emu-define-key unread ()
   (when (memq 'unread (mu4e-message-field item :flags))
     "Unread"))
@@ -127,10 +135,13 @@
             (match-string match-group message-subject))
           name message-subject))))
 
-(emu-define-key maildir (&key name regexp)
+(emu-define-key maildir (&key name regexp order)
   (let ((maildir (mu4e-message-field item :maildir)))
     (when (string-match regexp maildir)
-      (or name maildir))))
+      (let ((key (or name maildir)))
+        (if order
+            (propertize key :emu-order order)
+          key)))))
 
 (emu-define-key num-to/cc> (&key name num)
   (let ((contacts (append (mu4e-message-field item :to)
@@ -138,30 +149,31 @@
     (when (> (length contacts) num)
       (or name num))))
 
-(emu-define-key sent (&key name with-address)
+(emu-define-key sent (&key name with-address order)
   (when-let ((address (cl-loop for contact in (mu4e-message-field item :from)
                                for address = (plist-get contact :email)
                                when (mu4e-personal-address-p address)
                                return address)))
-    (or name
-        (when with-address
-          (concat "Sent from: " address))
-        "Sent")))
+    (emu-with-order
+     (or name
+         (when with-address
+           (concat "Sent from: " address))
+         "Sent"))))
 
 (defvar emu-keychains
-  `( :default ((sent (sent :with-address t) thread)
+  `( :default (((sent :order 80) (sent :with-address t) thread)
                (not :name "Read" :keys (unread))
-               ((maildir :name "Spam" :regexp ,(rx "/" (or "Junk" "Spam") eos))
+               ((maildir :name "Spam" :regexp ,(rx "/" (or "Junk" "Spam") eos) :order 98)
                 from)
-               ((maildir :name "Trash" :regexp ,(rx "/Trash" eos))
+               ((maildir :name "Trash" :regexp ,(rx "/Trash" eos) :order 99)
                 ((num-to/cc> :name "Group conversations" :num 1)
                  thread)
                 from)
-               ((maildir :name "Archives" :regexp ,(rx "/Archives/"))
+               ((maildir :name "Archives" :regexp ,(rx "/Archives/") :order 89)
                 ((num-to/cc> :name "Group conversations" :num 1)
                  thread)
                 from)
-               ((maildir :name "Inbox" :regexp ,(rx "/Inbox" eos))
+               ((maildir :name "Inbox" :regexp ,(rx "/Inbox" eos) :order 1)
                 ((list :name "Mailing lists")
                  (list :name "GitHub" :regexp "github.com")
                  list thread)
@@ -511,12 +523,18 @@ added to it."
                                     (when (taxy-items taxy)
                                       (let ((newest-message
                                              (car (seq-sort (lambda (a b)
-                                                              (not (time-less-p (mu4e-message-field a :date)
-                                                                                (mu4e-message-field b :date))))
+                                                              (not (time-less-p
+                                                                    (mu4e-message-field a :date)
+                                                                    (mu4e-message-field b :date))))
                                                             (taxy-items taxy)))))
                                         (mu4e-message-field newest-message :date)))))
                                 (taxy-sort-taxys (lambda (a _b)
                                                    (not (equal a "Mailing lists")))
+                                  #'taxy-name)
+                                (taxy-sort-taxys (lambda (a b)
+                                                   (let ((a-order (or (get-text-property 0 :emu-order a) 50))
+                                                         (b-order (or (get-text-property 0 :emu-order b) 50)))
+                                                     (< a-order b-order)))
                                   #'taxy-name)))
         ;; Before this point, no changes have been made to the buffer's contents.
         (setf emu-progress-reporter (make-progress-reporter "Emu: Inserting messages..."))
