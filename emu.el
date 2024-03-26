@@ -72,9 +72,15 @@
 
 ;; TODO: Add :order argument to rest of these keys.
 
-(emu-define-key unread ()
+(emu-define-key read (&key order)
+  (unless (memq 'unread (mu4e-message-field item :flags))
+    (emu-with-order
+     "Read")))
+
+(emu-define-key unread (&key order)
   (when (memq 'unread (mu4e-message-field item :flags))
-    "Unread"))
+    (emu-with-order
+     "Unread")))
 
 (emu-define-key date (&key (format "%F (%A)"))
   (let ((time (mu4e-message-field item :date)))
@@ -162,7 +168,7 @@
 
 (defvar emu-keychains
   `( :default (((sent :order 80) (sent :with-address t) thread)
-               (not :name "Read" :keys (unread))
+               ;; TODO: Add `:order' keyword to Taxy itself so `and'/`not' can use it.
                ((maildir :name "Spam" :regexp ,(rx "/" (or "Junk" "Spam") eos) :order 98)
                 from)
                ((maildir :name "Trash" :regexp ,(rx "/Trash" eos) :order 99)
@@ -189,7 +195,8 @@
                 from thread)
                ((list :name "Mailing lists")
                 (list :name "GitHub" :regexp "github.com")
-                list thread))
+                list thread)
+               (read :order 88))
      :mailing-list (thread)
      :spam ((sent thread)
             ((maildir :name "Trash" :regexp ,(rx "/Trash" eos))
