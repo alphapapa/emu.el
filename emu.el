@@ -253,7 +253,14 @@ Interactively, select from one of `emu-keychains'."
       subject)))
 
 (emu-define-column "Date" (:face org-time-grid)
-  (format-time-string "%c" (mu4e-message-field item :date)))
+  (let* ((date (mu4e-message-field item :date))
+         (format-string (if (> (float-time (time-subtract (current-time) date))
+                               31536000)
+                            ;; >= 1 year old: full date.
+                            "%c"
+                          ;; Less than one year old: abbreviate date.
+                          "%e %b %H:%M")))
+    (format-time-string format-string date)))
 
 (emu-define-column "List" ()
   (mu4e-message-field item :list))
