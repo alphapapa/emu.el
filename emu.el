@@ -64,23 +64,31 @@
   (taxy-define-key-definer emu-define-key
     emu-keys "emu-key" "FIXME: Docstring."))
 
-(defmacro emu-with-order (&rest body)
+(defmacro emu-with-args (&rest body)
+  (declare (indent defun))
   `(let ((value ,(macroexp-progn body)))
-     (if order
-         (propertize value :emu-order order)
-       value)))
+     (when order
+       (setf value (propertize value :emu-order order)))
+     (when discard
+       (setf value (propertize value :emu-discard t)))
+     value))
 
 ;; TODO: Add :order argument to rest of these keys.
 
-(emu-define-key read (&key order)
-  (unless (memq 'unread (mu4e-message-field item :flags))
-    (emu-with-order
-     "Read")))
+(emu-define-key flagged (&key name order discard)
+  (when (member 'flagged (mu4e-message-field item :flags))
+    (emu-with-args
+      (or name "Flagged"))))
 
-(emu-define-key unread (&key order)
+(emu-define-key read (&key discard order)
+  (unless (memq 'unread (mu4e-message-field item :flags))
+    (emu-with-args
+      "Read")))
+
+(emu-define-key unread (&key discard order)
   (when (memq 'unread (mu4e-message-field item :flags))
-    (emu-with-order
-     "Unread")))
+    (emu-with-args
+      "Unread")))
 
 (emu-define-key date (&key (format "%F (%A)"))
   (let ((time (mu4e-message-field item :date)))
@@ -104,7 +112,8 @@
                              (address (format "<%s>" email))
                              (name (when name
                                      (format "%s " name))))
-                  (concat name address))))
+                  (propertize (concat name address)
+                              'face 'emu-contact))))
     (let ((message-from (mu4e-message-field item :from))
           matched)
       (if (or name address)
@@ -132,7 +141,9 @@
 (emu-define-key thread ()
   (let ((subject (mu4e-message-field item :subject)))
     ;; HACK:
-    (truncate-string-to-width (string-trim-left subject (rx "Re:" (0+ blank))) 80 nil nil t t)))
+    (propertize (truncate-string-to-width
+                 (string-trim-left subject (rx "Re:" (0+ blank))) 80 nil nil t t)
+                'face 'emu-subject)))
 
 (emu-define-key subject (subject &key name match-group)
   (let ((message-subject (mu4e-message-field item :subject)))
@@ -141,61 +152,60 @@
             (match-string match-group message-subject))
           name message-subject))))
 
-(emu-define-key maildir (&key name regexp order)
+(emu-define-key maildir (&key name regexp order discard)
   (let ((maildir (mu4e-message-field item :maildir)))
     (when (string-match regexp maildir)
-      (let ((key (or name maildir)))
-        (if order
-            (propertize key :emu-order order)
-          key)))))
+      (emu-with-args
+        (or name maildir)))))
 
-(emu-define-key num-to/cc> (&key name num)
+(emu-define-key num-to/cc> (&key name num discard order)
   (let ((contacts (append (mu4e-message-field item :to)
                           (mu4e-message-field item :cc))))
     (when (> (length contacts) num)
-      (or name num))))
+      (emu-with-args
+        (or name num)))))
 
-(emu-define-key sent (&key name with-address order)
+(emu-define-key sent (&key name with-address order discard)
   (when-let ((address (cl-loop for contact in (mu4e-message-field item :from)
                                for address = (plist-get contact :email)
                                when (mu4e-personal-address-p address)
                                return address)))
-    (emu-with-order
-     (or name
-         (when with-address
-           (concat "Sent from: " address))
-         "Sent"))))
+    (emu-with-args
+      (or name
+          (when with-address
+            (concat "Sent from: " address))
+          "Sent"))))
 
 (defvar emu-keychains
-  `( :default (((sent :order 80) (sent :with-address t) thread)
+  `( :default (((maildir :name "Trash" :regexp ,(rx "/Trash" eos) :discard t :order 99)
+                ((num-to/cc> :name "Group conversations" :num 1)
+                 thread)
+                from)
+               ((sent :order 80 :discard t) (sent :with-address t) thread)
                ;; TODO: Add `:order' keyword to Taxy itself so `and'/`not' can use it.
                ((maildir :name "Spam" :regexp ,(rx "/" (or "Junk" "Spam") eos) :order 98)
                 from)
-               ((maildir :name "Trash" :regexp ,(rx "/Trash" eos) :order 99)
+               ((flagged :name "Flagged" :order 1)
+                ((num-to/cc> :name "Group conversations" :num 1 :order 1)
+                 thread)
+                from)
+               ((maildir :name "Archives" :regexp ,(rx "/Archives/") :discard t :order 89)
                 ((num-to/cc> :name "Group conversations" :num 1)
                  thread)
                 from)
-               ((maildir :name "Archives" :regexp ,(rx "/Archives/") :order 89)
-                ((num-to/cc> :name "Group conversations" :num 1)
+               ((list :name "Mailing lists")
+                (list :name "GitHub" :regexp "github.com")
+                list thread)
+               ((num-to/cc> :name "Group conversations" :num 1 :order 2)
+                thread)
+               ((maildir :name "Inbox" :regexp ,(rx "/Inbox" eos) :order 3)
+                ((num-to/cc> :name "Group conversations" :num 1 :order 3)
                  thread)
-                from)
-               ((maildir :name "Inbox" :regexp ,(rx "/Inbox" eos) :order 1)
-                ((list :name "Mailing lists")
-                 (list :name "GitHub" :regexp "github.com")
-                 list thread)
-                ((num-to/cc> :name "Group conversations" :num 1)
-                 thread)
-                ((list :name "Mailing lists")
-                 (list :name "GitHub" :regexp "github.com")
-                 list thread)
                 from)
                ((subject ,(rx (group "bug#" (1+ digit))) :name "Bugs")
                 (subject ,(rx (group "bug#" (1+ digit))) :match-group 1))
                ((not :name "Non-list" :keys (list))
                 from thread)
-               ((list :name "Mailing lists")
-                (list :name "GitHub" :regexp "github.com")
-                list thread)
                (read :order 88))
      :mailing-list (thread)
      :spam ((sent thread)
@@ -231,7 +241,7 @@ Interactively, select from one of `emu-keychains'."
 (eval-and-compile
   (taxy-magit-section-define-column-definer "emu"))
 
-(emu-define-column "From" (:max-width 40 :face emu-contact)
+(emu-define-column "From" (:max-width 30 :face emu-contact)
   (cl-labels ((format-contact (contact)
                 (pcase-let* (((map :email :name) contact)
                              (address (format "<%s>" email))
@@ -531,6 +541,15 @@ added to it."
                                   column-sizes emu-column-formatters)
               ;; Sort taxys by the most recent message in each.
               taxy (thread-last taxy
+                                (taxy-mapc-taxys
+                                  ;; Remove empty taxys (i.e. ones in which
+                                  ;; all items have been discarded).
+                                  (lambda (taxy)
+                                    (setf (taxy-taxys taxy)
+                                          (cl-remove-if
+                                           (lambda (taxy)
+                                             (get-text-property 0 :emu-discard (taxy-name taxy)))
+                                           (taxy-taxys taxy)))))
                                 (taxy-sort-taxys (lambda (a b)
                                                    (not (time-less-p a b)))
                                   (lambda (taxy)
