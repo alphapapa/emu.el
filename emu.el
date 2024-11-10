@@ -62,6 +62,13 @@
 
 ;;;; Keys
 
+;; TODO: Add a "common-args" argument to `taxy-define-key-definer' for
+;; (order discard), etc.  (And maybe figure out how to implement
+;; things like that at a deeper level, e.g. order and discard as
+;; implemented here could be done with wrapper functions that would
+;; set those properties on anything within them, rather than having to
+;; pass them as arguments.)
+
 (eval-and-compile
   (taxy-define-key-definer emu-define-key
     emu-keys "emu-key" "FIXME: Docstring."))
