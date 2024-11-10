@@ -160,6 +160,19 @@
       (emu-with-args
         (or name maildir)))))
 
+(emu-define-key account (&key name regexp order discard)
+  (let* ((maildir (mu4e-message-field item :maildir))
+         (account (or (when (string-match (rx bos "/" (group (1+ (not "/")))) maildir)
+                        (match-string 1 maildir))
+                      (error "Can't match account in maildir:%S"
+                             (mu4e-message-field item :maildir)))))
+    (pcase regexp
+      (`nil (emu-with-args
+              (or name account)))
+      (_ (when (string-match-p regexp account)
+           (emu-with-args
+             (or name account)))))))
+
 (emu-define-key num-to/cc> (&key name num discard order)
   (let ((contacts (append (mu4e-message-field item :to)
                           (mu4e-message-field item :cc))))
