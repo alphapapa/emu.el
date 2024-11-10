@@ -41,6 +41,8 @@
 (defvar emu-new-headers nil)
 (defvar emu-progress-reporter nil)
 
+(defvar emu-keychain-set-history nil)
+
 ;;;; Faces
 
 (defface emu-contact '((t (:inherit font-lock-variable-name-face)))
@@ -232,8 +234,15 @@
   "Set grouping keychain to KEYCHAIN.
 Interactively, select from one of `emu-keychains'."
   (interactive
-   (list (map-elt emu-keychains
-                  (intern (completing-read "Set keys: " (map-keys emu-keychains))))))
+   (list
+    (pcase (completing-read
+            "Set keys: " (append (map-keys emu-keychains) emu-keychain-set-history)
+            nil nil nil 'emu-keychain-set-history
+            (car emu-keychain-set-history))
+      ((and (rx bos "(") it)
+       (read it))
+      (it
+       (map-elt emu-keychains (intern it))))))
   (setf emu-keychain keychain))
 
 ;;;; Columns
